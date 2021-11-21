@@ -1,0 +1,36 @@
+---
+title: "Catenin Signature and PARP Inhibition in CTRP Cell Lines"
+output: html_notebook
+---
+
+```{r}
+
+#install BiocManager if needed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+#install GSVA if necessary
+if (!requireNamespace( "GSVA" , quietly = TRUE)) 
+    BiocManager::install("GSVA")
+
+library(tidyverse)
+library("GSVA")
+```
+
+
+Outline:
+  1. Load in the Catenin signature information created from differential gene expression analysis
+  2. Load in CTRP RNA-Seq data
+  3. Format and perform GSVA to score each CTRP cell line 
+  4. Load in the PARP inhibitor and Drug inhibitor information 
+  5. Perform correlation analysis between GSVA signature scores and Drug Inhibitor
+
+# Load in the Catenin signature information created from differential gene expression analysis
+```{r}
+
+```
+
+
+
+
+
