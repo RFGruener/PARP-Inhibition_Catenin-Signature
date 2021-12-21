@@ -1,0 +1,496 @@
+---
+title: "Catenin Signature and PARP Inhibition in CTRP Cell Lines"
+output: html_notebook
+---
+
+```{r}
+
+#install BiocManager if needed
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+#install GSVA if necessary
+if (!requireNamespace( "GSVA" , quietly = TRUE)) 
+    BiocManager::install("GSVA")
+
+library(tidyverse)
+library("GSVA")
+```
+
+
+Outline:
+  1. Load in the Catenin signature information created from differential gene expression analysis
+  2. Load in CTRP RNA-Seq data
+  3. Format and perform GSVA to score each CTRP cell line 
+  4. Load in the PARP inhibitor and Drug inhibitor information 
+  5. Perform correlation analysis between GSVA signature scores and Drug Inhibitor
+  
+
+# 1. Load in the Catenin signature information created from differential gene expression analysis
+```{r}
+files <- dir("./Signatures/", full.names = T, pattern = "\\.gmx")
+sig.names <- gsub(pattern = "./Signatures/|\\.gmx", replacement = "", x = files)
+
+signature_list <- list()
+
+for(i in 1:length(files)){
+  signature_list[[i]] <- scan(file = files[[i]], what = "character", skip = 2)
+    print(signature_list[[i]])
+  assign(sig.names[[i]], value = signature_list[[i]])
+}
+names(signature_list) <- sig.names
+CAT.signatures <- read_tsv(file = "Signatures/Cluster_6_HGNC_Reformat.gct", skip = 2)
+
+
+```
+
+
+# 2. Load in CCLE RNA-Seq data and CTRP AUC data
+
+```{r}
+
+##CClE Data
+#expression data is log(TPM) with a psuedo-count of 1
+CCLE_Expresssion_raw <- read_csv(file = "../drug-gene-correlation/data_in/CCLE_expression_21Q3.csv")
+
+CCLE <- rename(CCLE_Expresssion_raw, depmap_id = `...1`)
+
+names(CCLE) <- gsub(pattern = " \\(.*\\)", replacement = "", x = names(CCLE))
+
+
+
+
+### CTRP Data
+CTRP_AUCs_raw <- read_csv(file = "../drug-gene-correlation/data_in/Drug_sensitivity_AUC_(CTD^2).csv")
+
+CTRP <- CTRP_AUCs_raw %>% 
+  select(-c(3:6))
+
+colnames(CTRP) <- gsub(pattern = " \\(.*", replacement = "", x = names(CTRP))
+
+
+
+CCLE[1:10,1:10]
+CTRP[1:10, 1:10]
+
+
+```
+
+#   3. Format and perform GSVA to score each CCLE cell line 
+
+(Below information taken from the GSVA vignette found [here](https://bioconductor.org/packages/devel/bioc/vignettes/GSVA/inst/doc/GSVA.html#3_Overview_of_the_GSVA_functionality) )
+
+To use the `r gsva()` function from the GSVA package, we need:
+
+1. A normalized gene expression dataset, which can be provided as:
+    A matrix of expression values with genes corresponding to rows and samples corresponding to columns
+
+2. A collection of gene sets; which can be provided in one of the following containers 
+    A list object where each element corresponds to a gene set defined by a vector of gene identifiers, and the element names correspond to the names of the gene sets.
+    A GeneSetCollection object; see package GSEABase.
+
+TL;DR: Get a gene expression matrix (rows = genes, samples = columns), preferably continuous to use the default parameters of GSVA (our data is log(TPM) units so default will work). Get a list of signatures from signatures created previously
+
+
+
+```{r}
+### CCLE RNA-Seq data needs to be transposed 
+
+CCLE.matrix <- as.matrix(CCLE[,-1])
+rownames(CCLE.matrix) <- CCLE$depmap_id
+CCLE.matrix <- t(CCLE.matrix)
+
+CCLE.matrix[1:10, 1:10]
+#looks good now
+
+
+# The signature list is already a list of gene sets, with names. It looks appropriately formatted 
+summary(signature_list)
+
+gsva.es <- gsva(expr = CCLE.matrix, gset.idx.list = signature_list)
+
+gsva.es[1:6, 1:10]
+```
+
+
+# 4. Format the Drug inhibitor information
+
+Get the meta-data for CTRP drugs (MOA information) and then CCLE meta data (cell line origin)
+
+```{r}
+#join the gsva table with CCLE metadata
+gsva_ctrp <- as_tibble(t(gsva.es), rownames = "DepMap_ID")
+  
+CCLE_meta_data <- read_csv(file = "../drug-gene-correlation/data_in/sample_info.csv")
+
+gsva_ccl.meta <- CCLE_meta_data %>% 
+  select(DepMap_ID, cell_line_name, primary_disease, Subtype, lineage, lineage_subtype, lineage_sub_subtype) %>% 
+  right_join(x = ., y = gsva_ctrp)
+
+
+#make the CTRP AUC dataset long, combine with the drug meta data from Alex's review
+
+CTRP_long <- CTRP %>% pivot_longer(cols = 3:ncol(.), names_to = "Drug", values_to = "AUCs")
+
+CTRP_meta_data <- readxl::read_xlsx(path = "../drug-gene-correlation/data_in/Harmonized_Compound_Data.xlsx")
+
+CTRP_with_meta <- CTRP_meta_data %>% 
+  filter(Dataset == "CTRPv2") %>% 
+  select(Compound_Name_in_Dataset, Compound_MOA, Compound_Molecular_Targets) %>% 
+  left_join(x = CTRP_long, y = ., by = c("Drug" = "Compound_Name_in_Dataset"))
+
+
+#now combine the GSVA with CCLE metadata with the CTRP with meta data
+
+drug_gsva_final_data <- left_join(CTRP_with_meta, gsva_ccl.meta, by = c("depmap_id" = "DepMap_ID"))
+
+
+drug_gsva_final_data[1:10, ]
+  
+
+
+```
+
+
+
+#  5. Perform correlation analysis between GSVA signature scores and Drug Inhibitor
+
+```{r}
+#get which drugs we are filtering for...
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+drugs_of_interest
+
+
+#now, for each of the drugs, correlate their AUC value with the GSVA 
+drug_gsva_final_data %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  group_by(Drug) %>% 
+  drop_na(AUCs, any_of(sig.names)) %>%
+  summarise_at(vars({{sig.names}}), ~cor(AUCs,., method = "spearman"))
+```
+
+Here is another way of doing it to get the p-values as well
+
+
+```{r}
+
+drug_gsva_final_data %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  group_by(Drug) %>% 
+  drop_na(AUCs, any_of(sig.names)) %>%
+  mutate(count = n()) %>% 
+  group_by(Drug, count) %>% 
+  summarise_at(vars({{sig.names}}), ~tidy(cor.test(AUCs,., method = "spearman"))) %>% 
+  pivot_longer(cols = sig.names, names_to = "Gene_Set", values_to = "nested_tibbles") %>% 
+  unnest(cols = nested_tibbles) %>% 
+  select(Drug, Gene_Set, n_cell_lines = count, spearman_R = estimate, p.value) %>% 
+  arrange(p.value)
+
+```
+
+# 6 Turn that mess into a function so we can do this for any drug list or any subset of cell lines
+
+```{r correlation_function}
+
+gsva_filtering_function <- function(data_table = drug_gsva_final_data, 
+                                    drugs = drugs_of_interest,
+                                    cell_lines = cell_lines_of_interest,
+                                    signatures = sig.names){
+data_table %>% 
+  filter(Drug %in% drugs,
+         cell_line_name %in% cell_lines) %>% 
+  group_by(Drug) %>% 
+  drop_na(AUCs, any_of(sig.names)) %>%
+  mutate(count = n()) 
+}  
+
+cell_lines_of_interest <- unique(drug_gsva_final_data$cell_line_name)
+
+gsva_filtering_function()
+ 
+
+gsva_correlation_function <- function(gsva_filtering_output = gsva_filtered, signatures = sig.names){
+  gsva_filtering_output %>%  
+  group_by(Drug, count) %>% 
+  summarise_at(vars({{signatures}}), ~tidy(cor.test(AUCs,., method = "spearman"))) %>% 
+  pivot_longer(cols = signatures, names_to = "Gene_Set", values_to = "nested_tibbles") %>% 
+  unnest(cols = nested_tibbles) %>% 
+  select(Drug, Gene_Set, n_cell_lines = count, spearman_R = estimate, p.value) %>% 
+  arrange(p.value)
+  
+}
+
+
+```
+
+
+# 7. Come up with some graphing options
+
+```{r gsva graphing options}
+gsva_filtering_function() %>%
+  group_by(Drug, count) %>% 
+  pivot_longer(cols = sig.names, names_to = "gene_set", values_to = "GSVA") %>% 
+  ungroup() %>% 
+  ggplot(mapping = aes(x = AUCs, y = GSVA)) + 
+  geom_point() + 
+  facet_grid(gene_set ~ Drug)
+
+
+gsva_filtering_function() %>%
+  group_by(Drug, count) %>% 
+  pivot_longer(cols = sig.names, names_to = "gene_set", values_to = "GSVA") %>% 
+  ungroup() %>% 
+  filter(Drug == "olaparib") %>% 
+  ggplot(mapping = aes(x = AUCs, y = GSVA)) + 
+  geom_point() + 
+  facet_wrap(~gene_set)
+
+
+gsva_filtering_function() %>%
+  filter(Drug == "olaparib") %>% 
+  ggplot(mapping = aes(x = HALLMARK_G2M_CHECKPOINT, y = AUCs)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  ggpubr::stat_cor(method = "spearman")
+
+
+
+```
+
+
+# 8. Make a graphing function
+
+```{r gsva_graphing_function}
+gsva_graphing_function <- function(dataset, drug, gene_set, color = "none"){
+  
+  gene_set_var <- sym(gene_set)
+  
+  if(color == "none"){
+  dataset %>%
+  filter(Drug == drug) %>% 
+  ggplot(mapping = aes(x = !!gene_set_var, y = AUCs)) + 
+  geom_point() + 
+  geom_smooth(method = "lm") + 
+  ggpubr::stat_cor(method = "spearman") +
+    labs(title = paste(drug, gene_set, sep = "::"))
+  } else {
+  dataset %>%
+  filter(Drug == drug) %>% 
+  mutate(colored_cell_lines = if_else(cell_line_name %in% color, "T-Cell", "Other")) %>% 
+  ggplot(mapping = aes(x = !!gene_set_var, y = AUCs)) + 
+  geom_point(mapping = aes(color = colored_cell_lines)) + 
+  geom_smooth(method = "lm") + 
+  ggpubr::stat_cor(method = "spearman") +
+    labs(title = paste(drug, gene_set, sep = "::")) + 
+    scale_color_manual(values = c("black", "blue"))
+  }
+  
+}
+
+for(i in 1:length(sig.names)) {
+gsva_filtering_function() %>% 
+gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
+    print()
+}
+
+```
+
+# 9. Analysis: All CTRP Cell Lines
+
+```{r}
+
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+cell_lines_of_interest <- unique(drug_gsva_final_data$cell_line_name)
+
+gsva_filtering_function() %>% 
+  gsva_correlation_function()
+
+for(i in 1:length(sig.names)) {
+gsva_filtering_function() %>% 
+gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
+    print()
+}
+```
+
+
+
+# 10. Leukemia Cell Lines
+
+```{r}
+
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+cell_lines_of_interest <- drug_gsva_final_data %>% 
+  filter(primary_disease == "Leukemia") %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
+
+gsva_filtering_function() %>% 
+  gsva_correlation_function()
+
+for(i in 1:length(sig.names)) {
+gsva_filtering_function() %>% 
+gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
+    print()
+}
+
+
+```
+
+
+
+# 11. ALL
+
+```{r}
+
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+cell_lines_of_interest <- drug_gsva_final_data %>% 
+  filter(lineage_subtype == "ALL")  %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
+
+
+gsva_filtering_function() %>% 
+  gsva_correlation_function()
+
+for(i in 1:length(sig.names)) {
+gsva_filtering_function() %>% 
+gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
+    print()
+}
+```
+
+
+
+# 12. T-ALL
+
+```{r}
+
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+cell_lines_of_interest <- drug_gsva_final_data %>% 
+  filter(lineage_subtype == "ALL") %>% 
+  filter(lineage_sub_subtype == "t_cell") %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
+
+
+gsva_filtering_function() %>% 
+  gsva_correlation_function()
+
+for(i in 1:length(sig.names)) {
+gsva_filtering_function() %>% 
+gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
+    print()
+}
+```
+
+# 13. T-ALL from Stephen
+
+```{r}
+
+xlsx_stephen_cell_lines <-  readxl::read_xlsx(path = "./GDSC - Cell Lines Metadata_TALL.xlsx")
+stephen_cell_lines <- xlsx_stephen_cell_lines$`Sample Name`
+stephen_cell_lines <- tolower(stephen_cell_lines) 
+stephen_cell_lines <- gsub(pattern = "[[:punct:]]", replacement = "", x = stephen_cell_lines)
+
+
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+
+cell_lines_of_interest <- drug_gsva_final_data %>% 
+  filter(primary_disease == "Leukemia") %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
+
+
+tall_color <- drug_gsva_final_data %>% 
+  mutate(names_simple = tolower(
+                              gsub(pattern = "[[:punct:]]", 
+                                   replacement = "", 
+                                   x = cell_line_name))
+         ) %>% 
+  filter(names_simple %in% stephen_cell_lines) %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
+
+gsva_filtering_function() %>% 
+  gsva_correlation_function()
+
+for(i in 1:length(sig.names)) {
+gsva_filtering_function() %>% 
+gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i], color = tall_color) %>% 
+    print()
+}
+
+
+```
+
+
+```{r}
+for(i in 1:length(sig.names)) {
+  for(j in 1:length(drugs_of_interest)){
+gsva_filtering_function() %>% 
+gsva_graphing_function(drug = drugs_of_interest[j], gene_set = sig.names[i], color = tall_color) %>% 
+    print()
+  }
+}
+
+```
+
+
+
+Notes:
+The correlations start becoming meh (no significant correlations) once we get down to only the leukemia cell lines
+
+May need to repeat the GSVA for every subset of CCLs that I use
+
+T-ALL cell lines in Broad/CCLE names don't quite match (11/16)
+  Send Stephen the spreadsheet on CTRP Leukemia cell lines
+
+GDSC data still needs to be used
+
+Nice to see that the T-ALL cell lines do have a higher GSVA score in all the pathways Stephen gave me compared to any other leukemia
+
+
+Wnt vs PARP inhibitors (correlate); response and also GSVA 
+
+
+
+```{r}
+
+all_depman_leukemia_ccls <- drug_gsva_final_data %>% 
+  select(depmap_id, cell_line_name, primary_disease, lineage, lineage_subtype, lineage_sub_subtype) %>% 
+  distinct() %>% 
+  filter(primary_disease == "Leukemia") 
+
+write_csv(all_depman_leukemia_ccls, file = "all_DepMap_Leukemia_CCLs.csv")
+
+```
+
