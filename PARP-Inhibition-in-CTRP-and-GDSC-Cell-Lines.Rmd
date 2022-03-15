@@ -2,8 +2,18 @@
 title: "Catenin Signature and PARP Inhibition in CTRP Cell Lines"
 output: html_notebook
 ---
-
 ```{r}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+*Before starting, please make a data_in folder and place the following DepMap files there:*
+-"CCLE_expression_21Q3.csv"
+-"Drug_sensitivity_AUC_(CTD^2).csv
+-"sample_info.csv"
+
+Both of these files are available from [this link](https://depmap.org/portal/download/custom/) 
+
+```{r, results= "hide"}
 
 #install BiocManager if needed
 if (!requireNamespace("BiocManager", quietly = TRUE))
@@ -15,31 +25,43 @@ if (!requireNamespace( "GSVA" , quietly = TRUE))
 
 library(tidyverse)
 library("GSVA")
+library(broom)
+
 ```
 
 
 Outline:
-  1. Load in the Catenin signature information created from differential gene expression analysis
+  1. Load in the signature infortmation:
+        Signatures from MSigDB (G2M, HDR, etc.)
+        Catenin signature information created from differential gene expression analysis
   2. Load in CTRP RNA-Seq data
   3. Format and perform GSVA to score each CTRP cell line 
   4. Load in the PARP inhibitor and Drug inhibitor information 
   5. Perform correlation analysis between GSVA signature scores and Drug Inhibitor
   
 
-# 1. Load in the Catenin signature information created from differential gene expression analysis
+# 1. Load in the signature information 
 ```{r}
 files <- dir("./Signatures/", full.names = T, pattern = "\\.gmx")
 sig.names <- gsub(pattern = "./Signatures/|\\.gmx", replacement = "", x = files)
 
 signature_list <- list()
 
+#for loop reads in all the .gmx files from the signatures folder
 for(i in 1:length(files)){
   signature_list[[i]] <- scan(file = files[[i]], what = "character", skip = 2)
-    print(signature_list[[i]])
+   
   assign(sig.names[[i]], value = signature_list[[i]])
 }
-names(signature_list) <- sig.names
+
+#read in the CAT signature
 CAT.signatures <- read_tsv(file = "Signatures/Cluster_6_HGNC_Reformat.gct", skip = 2)
+Stephen_CAT_signature <- CAT.signatures$NAME
+
+#add CAT signature into the signature list
+signature_list[[i+1]] <- Stephen_CAT_signature
+sig.names[i+1] <- "Stephen_CAT_signature"
+names(signature_list) <- sig.names
 
 
 ```
@@ -48,30 +70,27 @@ CAT.signatures <- read_tsv(file = "Signatures/Cluster_6_HGNC_Reformat.gct", skip
 # 2. Load in CCLE RNA-Seq data and CTRP AUC data
 
 ```{r}
+#### CCLE Data ####
+#comes from DepMap, using Q3 release of 2021, but this dataset hasn't been meaningfully updated since then. 
 
-##CClE Data
 #expression data is log(TPM) with a psuedo-count of 1
+
 CCLE_Expresssion_raw <- read_csv(file = "../drug-gene-correlation/data_in/CCLE_expression_21Q3.csv")
 
 CCLE <- rename(CCLE_Expresssion_raw, depmap_id = `...1`)
 
-names(CCLE) <- gsub(pattern = " \\(.*\\)", replacement = "", x = names(CCLE))
+names(CCLE) <- gsub(pattern = " \\(.*\\)", replacement = "", x = names(CCLE)) #clean up the names of the Cell lines
 
 
+#### CTRP Data ####
+#this data also comes from DepMap (https://depmap.org/portal/download/custom/)
 
-
-### CTRP Data
 CTRP_AUCs_raw <- read_csv(file = "../drug-gene-correlation/data_in/Drug_sensitivity_AUC_(CTD^2).csv")
 
 CTRP <- CTRP_AUCs_raw %>% 
   select(-c(3:6))
 
-colnames(CTRP) <- gsub(pattern = " \\(.*", replacement = "", x = names(CTRP))
-
-
-
-CCLE[1:10,1:10]
-CTRP[1:10, 1:10]
+colnames(CTRP) <- gsub(pattern = " \\(.*", replacement = "", x = names(CTRP)) #clean up drug names as well
 
 
 ```
@@ -80,7 +99,7 @@ CTRP[1:10, 1:10]
 
 (Below information taken from the GSVA vignette found [here](https://bioconductor.org/packages/devel/bioc/vignettes/GSVA/inst/doc/GSVA.html#3_Overview_of_the_GSVA_functionality) )
 
-To use the `r gsva()` function from the GSVA package, we need:
+To use the `gsva()` function from the GSVA package, we need:
 
 1. A normalized gene expression dataset, which can be provided as:
     A matrix of expression values with genes corresponding to rows and samples corresponding to columns
@@ -91,6 +110,19 @@ To use the `r gsva()` function from the GSVA package, we need:
 
 TL;DR: Get a gene expression matrix (rows = genes, samples = columns), preferably continuous to use the default parameters of GSVA (our data is log(TPM) units so default will work). Get a list of signatures from signatures created previously
 
+```{r}
+#get more gene sets
+
+library("msigdbr")
+
+m_t2g <- msigdbr(species = "Homo sapiens", category = "H") %>%
+  dplyr::select(gs_name, human_gene_symbol) %>% 
+  group_by(gs_name)
+
+hallmark_gene_list <- split(x = m_t2g$human_gene_symbol, f = m_t2g$gs_name)
+
+
+```
 
 
 ```{r}
@@ -100,7 +132,7 @@ CCLE.matrix <- as.matrix(CCLE[,-1])
 rownames(CCLE.matrix) <- CCLE$depmap_id
 CCLE.matrix <- t(CCLE.matrix)
 
-CCLE.matrix[1:10, 1:10]
+CCLE.matrix[1:5, 1:10]
 #looks good now
 
 
@@ -108,16 +140,27 @@ CCLE.matrix[1:10, 1:10]
 summary(signature_list)
 
 gsva.es <- gsva(expr = CCLE.matrix, gset.idx.list = signature_list)
+gsva.hallmark <- gsva(expr = CCLE.matrix, gset.idx.list = hallmark_gene_list)
 
 gsva.es[1:6, 1:10]
+
+gsva_all_sigs <- rbind(gsva.es, gsva.hallmark)
+
+rownames(gsva_all_sigs)[duplicated(rownames(gsva_all_sigs))] <- paste(rownames(gsva_all_sigs)[duplicated(rownames(gsva_all_sigs))], "2", sep = "_")
+
+
 ```
 
+**Fix, technically the gene sets should be all together before running GSVA (apparently) because otherwise they are slightly off looking at the HALLMARK_G2M_CHECKPOINT which is the appears in both sets 
 
 # 4. Format the Drug inhibitor information
 
 Get the meta-data for CTRP drugs (MOA information) and then CCLE meta data (cell line origin)
 
 ```{r}
+
+gsva.es <- gsva_all_sigs
+
 #join the gsva table with CCLE metadata
 gsva_ctrp <- as_tibble(t(gsva.es), rownames = "DepMap_ID")
   
@@ -145,7 +188,7 @@ CTRP_with_meta <- CTRP_meta_data %>%
 drug_gsva_final_data <- left_join(CTRP_with_meta, gsva_ccl.meta, by = c("depmap_id" = "DepMap_ID"))
 
 
-drug_gsva_final_data[1:10, ]
+knitr::kable(drug_gsva_final_data[1:10, ])
   
 
 
@@ -156,18 +199,11 @@ drug_gsva_final_data[1:10, ]
 #  5. Perform correlation analysis between GSVA signature scores and Drug Inhibitor
 
 ```{r}
-#get which drugs we are filtering for...
-drugs_of_interest <- CTRP_with_meta %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
-  distinct(Drug) %>% 
-  pull(Drug)
 
-drugs_of_interest
 
 
 #now, for each of the drugs, correlate their AUC value with the GSVA 
-drug_gsva_final_data %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+drug_gsva_final_data  %>% 
   group_by(Drug) %>% 
   drop_na(AUCs, any_of(sig.names)) %>%
   summarise_at(vars({{sig.names}}), ~cor(AUCs,., method = "spearman"))
@@ -177,6 +213,7 @@ Here is another way of doing it to get the p-values as well
 
 
 ```{r}
+
 
 drug_gsva_final_data %>% 
   filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
@@ -191,6 +228,18 @@ drug_gsva_final_data %>%
   arrange(p.value)
 
 ```
+
+```{r}
+#get which drugs we are filtering for...
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+drugs_of_interest
+```
+
+
 
 # 6 Turn that mess into a function so we can do this for any drug list or any subset of cell lines
 
@@ -406,14 +455,14 @@ gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>%
 }
 ```
 
-# 13. T-ALL from Stephen
+# 13. Leukemia with T-ALL colored
 
 ```{r}
-
-xlsx_stephen_cell_lines <-  readxl::read_xlsx(path = "./GDSC - Cell Lines Metadata_TALL.xlsx")
-stephen_cell_lines <- xlsx_stephen_cell_lines$`Sample Name`
-stephen_cell_lines <- tolower(stephen_cell_lines) 
-stephen_cell_lines <- gsub(pattern = "[[:punct:]]", replacement = "", x = stephen_cell_lines)
+#Stephen said just to use the T-ALL categorization that DepMap uses
+# xlsx_stephen_cell_lines <-  readxl::read_xlsx(path = "./GDSC - Cell Lines Metadata_TALL.xlsx")
+# stephen_cell_lines <- xlsx_stephen_cell_lines$`Sample Name`
+# stephen_cell_lines <- tolower(stephen_cell_lines) 
+# stephen_cell_lines <- gsub(pattern = "[[:punct:]]", replacement = "", x = stephen_cell_lines)
 
 
 drugs_of_interest <- CTRP_with_meta %>% 
@@ -430,18 +479,16 @@ cell_lines_of_interest <- drug_gsva_final_data %>%
 
 
 tall_color <- drug_gsva_final_data %>% 
-  mutate(names_simple = tolower(
-                              gsub(pattern = "[[:punct:]]", 
-                                   replacement = "", 
-                                   x = cell_line_name))
-         ) %>% 
-  filter(names_simple %in% stephen_cell_lines) %>% 
+  filter(lineage_subtype == "ALL") %>% 
+  filter(lineage_sub_subtype == "t_cell") %>% 
   select(cell_line_name) %>% 
   distinct() %>% 
   pull(cell_line_name)
 
 gsva_filtering_function() %>% 
-  gsva_correlation_function()
+  gsva_correlation_function() -> gsva_final_correlation_leukemia
+
+gsva_final_correlation_leukemia
 
 for(i in 1:length(sig.names)) {
 gsva_filtering_function() %>% 
@@ -464,15 +511,156 @@ gsva_graphing_function(drug = drugs_of_interest[j], gene_set = sig.names[i], col
 
 ```
 
+# CHECK: IS GSVA the same no matter the number of CCLs used
+```{r}
+#get TALL cell lines (DEPMAP IDs)
+TALL_cell_lines <- drug_gsva_final_data %>% 
+  filter(lineage_subtype == "ALL") %>% 
+  filter(lineage_sub_subtype == "t_cell") %>% 
+  select(depmap_id) %>% 
+  distinct() %>% 
+  pull(depmap_id)
+
+TALL_cell_lines
+
+
+#Perform GSVA
+gsva.tall <- gsva(expr = CCLE.matrix[,TALL_cell_lines], gset.idx.list = signature_list)
+
+#Print Results and compare to original
+
+gsva.es.subtall <- gsva.es[,TALL_cell_lines]
+
+
+#the two highly correlate
+for(i in 1:6){
+cor(gsva.es.subtall[i,], gsva.tall[i,]) %>% print()
+}
+```
+
+The two highly correlate, but looking at the numbers themselves, the absolute values definitely change. Let's try just the leukemia cell lines
+
+```{r}
+
+#get all leukemia cell lines (DEPMAP IDs)
+leukemia_cell_lines <- drug_gsva_final_data %>% 
+  filter(primary_disease == "Leukemia") %>% 
+  select(depmap_id) %>% 
+  distinct() %>% 
+  pull(depmap_id)
+
+leukemia_cell_lines
+
+
+#Perform GSVA
+gsva.leukemia <- gsva(expr = CCLE.matrix[,leukemia_cell_lines], gset.idx.list = signature_list)
+
+
+
+#join the gsva table with CCLE metadata
+gsva_leukemia <- as_tibble(t(gsva.leukemia), rownames = "DepMap_ID")
+  
+gsva_leukemia.meta <- CCLE_meta_data %>% 
+  select(DepMap_ID, cell_line_name, primary_disease, Subtype, lineage, lineage_subtype, lineage_sub_subtype) %>% 
+  right_join(x = ., y = gsva_leukemia)
+
+
+#now combine the GSVA with CCLE metadata with the CTRP with meta data
+
+drug_gsva_leukemia <- inner_join(CTRP_with_meta, gsva_leukemia.meta, by = c("depmap_id" = "DepMap_ID"))
+
+
+
+```
+
+
+# 14. Leukemia GSVA and T-ALL Colored 
+
+```{r}
+# now go through the graphing function as before
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+
+cell_lines_of_interest <- drug_gsva_leukemia %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
+
+
+tall_color <- drug_gsva_leukemia %>% 
+  filter(lineage_subtype == "ALL") %>% 
+  filter(lineage_sub_subtype == "t_cell") %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
+
+gsva_filtering_function(data_table = drug_gsva_leukemia) %>% 
+  gsva_correlation_function() -> gsva_leukemia_correlation_leukemia
+
+for(i in 1:length(sig.names)) {
+gsva_filtering_function(data_table = drug_gsva_leukemia) %>% 
+gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i], color = tall_color) %>% 
+    print()
+}
+  
+
+```
+
+My conclusion from this is essentially that they are exactly the same, the leukemia only ones are maybe just slightly better (12 pathways in the leukemia only are significant while 10 are significant with all the cell lines)
+
+The only noteable change is that this filters out some genes because they don't change expression in the leukemia cell lines (usually means they are not expressed) 
+
+
+# Incorporate GDSC Data
+
+```{r}
+Harmonized_CCL_data <- readxl::read_excel(path = "Harmonized_CCL_data.xlsx")
+GDSC1 <- read_csv(file = "GDSC1_fitted_dose_response_25Feb20.csv")
+GDSC2 <- read_csv(file = "GDSC2_fitted_dose_response_25Feb20.csv")
+
+
+Harmonized_CCL_data %>% 
+  select(Cell_Line_Name_In_Dataset, Dataset, Harmonized_Cell_Line_ID) %>% 
+  mutate(RRID = gsub(pattern = ".*RRID:|)", replacement = "", x = Harmonized_Cell_Line_ID)) ->
+small_harmonized_CCL
+
+GDSC1 %>% select(CELL_LINE_NAME, DRUG_NAME, LN_IC50) %>% 
+  left_join(. , small_harmonized_CCL, by = c("CELL_LINE_NAME" = "Cell_Line_Name_In_Dataset")) %>% 
+  select(-Dataset) %>% 
+  distinct() ->
+RRID_GDSC1
+```
+
+
+```{r}
+#gsva_ccl.meta should work still
+ 
+#need DEPMAP IDs though
+small_CCLE_metadata <- CCLE_meta_data %>% select(DepMap_ID, RRID)
+
+RRID_GDSC1 %>% left_join(., y = small_CCLE_metadata) %>% 
+  select(DepMap_ID, DRUG_NAME, LN_IC50) ->
+DepMap_GDSC1
+
+GDSC_with_meta <- CTRP_meta_data %>% 
+  filter(Dataset == "GDSC1") %>% 
+  select(Compound_Name_in_Dataset, Compound_MOA, Compound_Molecular_Targets) %>% 
+  left_join(x = DepMap_GDSC1, y = ., by = c("DRUG_NAME" = "Compound_Name_in_Dataset"))
+
+
+#now combine the GSVA with CCLE metadata with the CTRP with meta data
+
+drug_gsva_final_data <- left_join(GDSC_with_meta, gsva_ccl.meta)
+
+```
+
 
 
 Notes:
-The correlations start becoming meh (no significant correlations) once we get down to only the leukemia cell lines
 
-May need to repeat the GSVA for every subset of CCLs that I use
-
-T-ALL cell lines in Broad/CCLE names don't quite match (11/16)
-  Send Stephen the spreadsheet on CTRP Leukemia cell lines
 
 GDSC data still needs to be used
 
@@ -481,16 +669,13 @@ Nice to see that the T-ALL cell lines do have a higher GSVA score in all the pat
 
 Wnt vs PARP inhibitors (correlate); response and also GSVA 
 
+Notch mutations, PTEN and AKT alterations (PTEN mutations are more prevalent)
+  PTEN mutation might be effectively the same as B-catenin stabilization
+  B-catenin mutations are not common in T-ALL 
+  (Notch somehow needs B-catenin it appears)
+  Indirect mechanisms leading to B-catenin
+  
+  
+  
 
-
-```{r}
-
-all_depman_leukemia_ccls <- drug_gsva_final_data %>% 
-  select(depmap_id, cell_line_name, primary_disease, lineage, lineage_subtype, lineage_sub_subtype) %>% 
-  distinct() %>% 
-  filter(primary_disease == "Leukemia") 
-
-write_csv(all_depman_leukemia_ccls, file = "all_DepMap_Leukemia_CCLs.csv")
-
-```
 
