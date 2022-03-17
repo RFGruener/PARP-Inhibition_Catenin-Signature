@@ -199,51 +199,64 @@ knitr::kable(drug_gsva_final_data[1:10, ])
 #  5. Perform correlation analysis between GSVA signature scores and Drug Inhibitor
 
 ```{r}
-
-
+sig.names <- c(names(signature_list), names(hallmark_gene_list))
 
 #now, for each of the drugs, correlate their AUC value with the GSVA 
 drug_gsva_final_data  %>% 
   group_by(Drug) %>% 
   drop_na(AUCs, any_of(sig.names)) %>%
-  summarise_at(vars({{sig.names}}), ~cor(AUCs,., method = "spearman"))
+  summarise_at(vars({{sig.names}}), ~cor(AUCs,., method = "spearman")) %>% knitr::kable()
 ```
 
-Here is another way of doing it to get the p-values as well
+The table above gets a correlation between cell line GSVA score in that pathway and drug response to that drug across all cell lines. But the format is a matrix and harder to work with. Keeping it just in case, but below is better: 
 
+Here is another way of doing it to get the p-values as well:
 
 ```{r}
-
-
 drug_gsva_final_data %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" ))  %>% #filtering down for testing 
   group_by(Drug) %>% 
-  drop_na(AUCs, any_of(sig.names)) %>%
-  mutate(count = n()) %>% 
-  group_by(Drug, count) %>% 
+  drop_na(AUCs, any_of(sig.names)) %>% #for each drug, drops any row (cell line) where the GSVA or AUC is an NA
+  mutate(count = n()) %>% #for each Drug, counts how many cell lines were tested
+  group_by(Drug, count) %>% #regroups, just to keep these two things together
   summarise_at(vars({{sig.names}}), ~tidy(cor.test(AUCs,., method = "spearman"))) %>% 
+  #fancy summarize, does a cor.test between AUC and each column in sig.names 
+    #(vars({{}})) allows the vector to be interpretted as a Tidy input
+  #tidy allows the output to be a Tibble, 
+    #each drug then has a tibble of correlation results for each signature column
   pivot_longer(cols = sig.names, names_to = "Gene_Set", values_to = "nested_tibbles") %>% 
+  #make tidy format and then unnest the tibbles 
   unnest(cols = nested_tibbles) %>% 
   select(Drug, Gene_Set, n_cell_lines = count, spearman_R = estimate, p.value) %>% 
-  arrange(p.value)
+  arrange(p.value) %>% 
+  knitr::kable()
 
-```
-
-```{r}
-#get which drugs we are filtering for...
-drugs_of_interest <- CTRP_with_meta %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
-  distinct(Drug) %>% 
-  pull(Drug)
-
-drugs_of_interest
 ```
 
 
 
 # 6 Turn that mess into a function so we can do this for any drug list or any subset of cell lines
 
+
+```{r}
+#get default cell line and drugs of interest values
+
+drugs_of_interest <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+drugs_of_interest
+
+cell_lines_of_interest <- unique(drug_gsva_final_data$cell_line_name)
+
+```
+
+
 ```{r correlation_function}
+#make 2 functions 
+#first one just is dynamic to filter for particular drugs, particular signatures, or particular cell lines
+#this will also allow for easier graphing of individual pathways
 
 gsva_filtering_function <- function(data_table = drug_gsva_final_data, 
                                     drugs = drugs_of_interest,
@@ -257,10 +270,7 @@ data_table %>%
   mutate(count = n()) 
 }  
 
-cell_lines_of_interest <- unique(drug_gsva_final_data$cell_line_name)
-
-gsva_filtering_function()
- 
+#this one will take the output of the filtering function and then get the correlations from before as done in the last code chunk
 
 gsva_correlation_function <- function(gsva_filtering_output = gsva_filtered, signatures = sig.names){
   gsva_filtering_output %>%  
@@ -277,41 +287,68 @@ gsva_correlation_function <- function(gsva_filtering_output = gsva_filtered, sig
 ```
 
 
-# 7. Come up with some graphing options
-
-```{r gsva graphing options}
-gsva_filtering_function() %>%
-  group_by(Drug, count) %>% 
-  pivot_longer(cols = sig.names, names_to = "gene_set", values_to = "GSVA") %>% 
-  ungroup() %>% 
-  ggplot(mapping = aes(x = AUCs, y = GSVA)) + 
-  geom_point() + 
-  facet_grid(gene_set ~ Drug)
+# 7. Make a bunch of graphing function
 
 
-gsva_filtering_function() %>%
-  group_by(Drug, count) %>% 
-  pivot_longer(cols = sig.names, names_to = "gene_set", values_to = "GSVA") %>% 
-  ungroup() %>% 
-  filter(Drug == "olaparib") %>% 
-  ggplot(mapping = aes(x = AUCs, y = GSVA)) + 
-  geom_point() + 
-  facet_wrap(~gene_set)
 
+```{r}
 
-gsva_filtering_function() %>%
-  filter(Drug == "olaparib") %>% 
-  ggplot(mapping = aes(x = HALLMARK_G2M_CHECKPOINT, y = AUCs)) + 
-  geom_point() + 
-  geom_smooth(method = "lm") + 
-  ggpubr::stat_cor(method = "spearman")
+# Make a full table with all the correlations 
+# 
+# These correlations are done for every CCL, i.e. pan-cancer. That will have to be interrogated further
 
+all_correlations <- gsva_filtering_function(data_table = drug_gsva_final_data, 
+                                    drugs = unique(CTRP_with_meta$Drug),
+                                    cell_lines = unique(drug_gsva_final_data$cell_line_name),
+                                    signatures = sig.names) %>% 
+  gsva_correlation_function()
 
 
 ```
 
+Code below makes a graphing function for interrogating correlations for one pathway across all drugs or for one drug across all 56 pathways
 
-# 8. Make a graphing function
+
+```{r}
+one_geneset_all_drugs_graph <- function(correlation_output = all_correlations, 
+                                        geneset_filter = "HALLMARK_G2M_CHECKPOINT",
+                                        drugs_of_interest_color = drugs_of_interest){
+  all_correlations %>% 
+  filter(Gene_Set == geneset_filter) %>% 
+  mutate(PARP_orWNT_inhibitor = if_else(Drug %in% drugs_of_interest_color, "YES", "Other")) %>% 
+  ggplot(aes(x = spearman_R, fill = PARP_orWNT_inhibitor)) +
+  geom_dotplot(dotsize = 0.65, method = "histodot") +
+  scale_y_continuous(NULL, breaks = NULL) + 
+  theme_classic() + 
+  labs(title = paste("Distribution of Correlations:"),
+       subtitle = paste("CTRP cell line drug response correlated with enrichment in\n", geneset_filter, "for all drugs"))
+  
+}
+
+one_geneset_all_drugs_graph()
+
+one_drug_all_genesets_graph <- function(correlation_output = all_correlations, 
+                                        drug_filter = drugs_of_interest[1],
+                                        gene_sets_of_interest = sig.names[1:7]){
+
+all_correlations %>% 
+  filter(Drug == drug_filter) %>% 
+  mutate(Pathways_of_interest = if_else(Gene_Set %in% gene_sets_of_interest, "CAT Associated", "Other")) %>% 
+  ggplot(aes(x = spearman_R, fill = Pathways_of_interest)) +
+  geom_dotplot(method = "histodot", count = 10) +
+  scale_y_continuous(NULL, breaks = NULL) + 
+  theme_classic() + 
+  labs(title = paste("Distribution of Correlations:"),
+       subtitle = paste("For", drug_filter, "Correlation Among All Pathways"))
+     }
+
+one_drug_all_genesets_graph()
+
+```
+
+
+
+Make a graphing function for interrogating individual drug:pathway relationships
 
 ```{r gsva_graphing_function}
 gsva_graphing_function <- function(dataset, drug, gene_set, color = "none"){
@@ -340,11 +377,9 @@ gsva_graphing_function <- function(dataset, drug, gene_set, color = "none"){
   
 }
 
-for(i in 1:length(sig.names)) {
 gsva_filtering_function() %>% 
-gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
-    print()
-}
+gsva_graphing_function(drug = "olaparib", gene_set = "HALLMARK_G2M_CHECKPOINT") 
+
 
 ```
 
@@ -664,7 +699,9 @@ Notes:
 
 GDSC data still needs to be used
 
-Nice to see that the T-ALL cell lines do have a higher GSVA score in all the pathways Stephen gave me compared to any other leukemia
+Nice to see that the T-ALL cell lines do have a higher GSVA score in all the pathways Stephen gave me compared to any other leukemia:
+
+  Do this, plot GSVA for all cell lines by Tissue type!!!!
 
 
 Wnt vs PARP inhibitors (correlate); response and also GSVA 
