@@ -309,14 +309,17 @@ all_correlations <- gsva_filtering_function(data_table = drug_gsva_final_data,
 Code below makes a graphing function for interrogating correlations for one pathway across all drugs or for one drug across all 56 pathways
 
 
+### Interrogating geneset or drug across all the other
+
+
 ```{r}
 one_geneset_all_drugs_graph <- function(correlation_output = all_correlations, 
                                         geneset_filter = "HALLMARK_G2M_CHECKPOINT",
                                         drugs_of_interest_color = drugs_of_interest){
-  all_correlations %>% 
+  correlation_output %>% 
   filter(Gene_Set == geneset_filter) %>% 
-  mutate(PARP_orWNT_inhibitor = if_else(Drug %in% drugs_of_interest_color, "YES", "Other")) %>% 
-  ggplot(aes(x = spearman_R, fill = PARP_orWNT_inhibitor)) +
+  mutate(PARP_orWNT_inhibitor = if_else(Drug %in% drugs_of_interest_color, "YES", "Other")) %>%
+   ggplot(aes(x = spearman_R, fill = PARP_orWNT_inhibitor)) +
   geom_dotplot(dotsize = 0.65, method = "histodot") +
   scale_y_continuous(NULL, breaks = NULL) + 
   theme_classic() + 
@@ -328,14 +331,15 @@ one_geneset_all_drugs_graph <- function(correlation_output = all_correlations,
 one_geneset_all_drugs_graph()
 
 one_drug_all_genesets_graph <- function(correlation_output = all_correlations, 
-                                        drug_filter = drugs_of_interest[1],
+                                        drug_filter = drugs_of_interest[2],
                                         gene_sets_of_interest = sig.names[1:7]){
 
-all_correlations %>% 
+correlation_output %>% 
   filter(Drug == drug_filter) %>% 
   mutate(Pathways_of_interest = if_else(Gene_Set %in% gene_sets_of_interest, "CAT Associated", "Other")) %>% 
+    mutate(Pathways_of_interest = as_factor(Pathways_of_interest)) %>% 
   ggplot(aes(x = spearman_R, fill = Pathways_of_interest)) +
-  geom_dotplot(method = "histodot", count = 10) +
+  geom_dotplot(method = "histodot") +
   scale_y_continuous(NULL, breaks = NULL) + 
   theme_classic() + 
   labs(title = paste("Distribution of Correlations:"),
@@ -348,7 +352,7 @@ one_drug_all_genesets_graph()
 
 
 
-Make a graphing function for interrogating individual drug:pathway relationships
+### Interrogating individual drug:pathway relationships
 
 ```{r gsva_graphing_function}
 gsva_graphing_function <- function(dataset, drug, gene_set, color = "none"){
@@ -383,96 +387,33 @@ gsva_graphing_function(drug = "olaparib", gene_set = "HALLMARK_G2M_CHECKPOINT")
 
 ```
 
-# 9. Analysis: All CTRP Cell Lines
+
+# 8. What cell line subset? Pan-cancer, leukemia, ALL, T-ALL?
+
+Based on previous work, not shown (see git commits), it seems like Pan-cancer and leukemia might be the best because otherwise the n value gets pretty small.
+
+Pan-cancer: 799, Leukemia: 70, ALL: 24, T-ALL 13
 
 ```{r}
+pancancer_cell_lines <- drug_gsva_final_data %>% 
+  select(cell_line_name) %>% 
+  distinct() %>% 
+  pull(cell_line_name)
 
-drugs_of_interest <- CTRP_with_meta %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
-  distinct(Drug) %>% 
-  pull(Drug)
-
-cell_lines_of_interest <- unique(drug_gsva_final_data$cell_line_name)
-
-gsva_filtering_function() %>% 
-  gsva_correlation_function()
-
-for(i in 1:length(sig.names)) {
-gsva_filtering_function() %>% 
-gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
-    print()
-}
-```
-
-
-
-# 10. Leukemia Cell Lines
-
-```{r}
-
-drugs_of_interest <- CTRP_with_meta %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
-  distinct(Drug) %>% 
-  pull(Drug)
-
-cell_lines_of_interest <- drug_gsva_final_data %>% 
+leukemia_cell_lines <-drug_gsva_final_data %>% 
   filter(primary_disease == "Leukemia") %>% 
   select(cell_line_name) %>% 
   distinct() %>% 
   pull(cell_line_name)
 
-gsva_filtering_function() %>% 
-  gsva_correlation_function()
 
-for(i in 1:length(sig.names)) {
-gsva_filtering_function() %>% 
-gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
-    print()
-}
-
-
-```
-
-
-
-# 11. ALL
-
-```{r}
-
-drugs_of_interest <- CTRP_with_meta %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
-  distinct(Drug) %>% 
-  pull(Drug)
-
-cell_lines_of_interest <- drug_gsva_final_data %>% 
+ALL_cell_lines<- drug_gsva_final_data %>% 
   filter(lineage_subtype == "ALL")  %>% 
   select(cell_line_name) %>% 
   distinct() %>% 
   pull(cell_line_name)
 
-
-gsva_filtering_function() %>% 
-  gsva_correlation_function()
-
-for(i in 1:length(sig.names)) {
-gsva_filtering_function() %>% 
-gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
-    print()
-}
-```
-
-
-
-# 12. T-ALL
-
-```{r}
-
-drugs_of_interest <- CTRP_with_meta %>% 
-  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
-  distinct(Drug) %>% 
-  pull(Drug)
-
-cell_lines_of_interest <- drug_gsva_final_data %>% 
+TALL_cell_lines <- drug_gsva_final_data %>% 
   filter(lineage_subtype == "ALL") %>% 
   filter(lineage_sub_subtype == "t_cell") %>% 
   select(cell_line_name) %>% 
@@ -480,19 +421,177 @@ cell_lines_of_interest <- drug_gsva_final_data %>%
   pull(cell_line_name)
 
 
-gsva_filtering_function() %>% 
-  gsva_correlation_function()
+all_drugs <- unique(CTRP_with_meta$Drug)
 
-for(i in 1:length(sig.names)) {
-gsva_filtering_function() %>% 
-gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i]) %>% 
+
+PARP_WNT_drugs <- CTRP_with_meta %>% 
+  filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
+  distinct(Drug) %>% 
+  pull(Drug)
+
+all_signatures <- sig.names
+
+CAT_associated_signatures <- c(names(signature_list)) #there is 2 HALLMARK_G2M_pathways. Issue?
+
+
+```
+
+# 9. Most highly correlated drugs for each pathway of interest
+
+## For pan-cancer cell lines
+
+```{r, message = FALSE, warning = false}
+pancancer_correlations <- gsva_filtering_function(data_table = drug_gsva_final_data, 
+                        drugs = all_drugs,
+                        cell_lines = pancancer_cell_lines,
+                        signatures = all_signatures) %>% 
+  
+  gsva_correlation_function(gsva_filtering_output = ., 
+                            signatures = all_signatures) 
+  
+for(i in 1:length(CAT_associated_signatures)){
+  one_geneset_all_drugs_graph(correlation_output = pancancer_correlations, 
+                              geneset_filter = CAT_associated_signatures[i],
+                              drugs_of_interest_color = PARP_WNT_drugs) %>% 
     print()
+  
 }
 ```
 
-# 13. Leukemia with T-ALL colored
+```{r}
+pancancer_correlations %>% 
+  filter(Gene_Set == "Stephen_CAT_signature",
+         abs(spearman_R) > 0.4)
+```
+
+
+## For leukemia cell lines
+
+```{r, message = FALSE, warning = false}
+leukemia_correlations <- gsva_filtering_function(data_table = drug_gsva_final_data, 
+                        drugs = all_drugs,
+                        cell_lines = leukemia_cell_lines,
+                        signatures = all_signatures) %>% 
+  
+  gsva_correlation_function(gsva_filtering_output = ., 
+                            signatures = all_signatures) 
+  
+for(i in 1:length(CAT_associated_signatures)){
+  one_geneset_all_drugs_graph(correlation_output = leukemia_correlations, 
+                              geneset_filter = CAT_associated_signatures[i],
+                              drugs_of_interest_color = PARP_WNT_drugs) %>% 
+    print()
+  
+}
+```
 
 ```{r}
+leukemia_correlations %>% 
+  filter(Gene_Set == "Stephen_CAT_signature",
+         abs(spearman_R) > 0.5)
+```
+
+
+## For ALL cell lines
+
+```{r, message = FALSE, warning = false}
+ALL_correlations <- gsva_filtering_function(data_table = drug_gsva_final_data, 
+                        drugs = all_drugs,
+                        cell_lines = ALL_cell_lines,
+                        signatures = all_signatures) %>% 
+  
+  gsva_correlation_function(gsva_filtering_output = ., 
+                            signatures = all_signatures) 
+  
+for(i in 1:length(CAT_associated_signatures)){
+  one_geneset_all_drugs_graph(correlation_output = ALL_correlations, 
+                              geneset_filter = CAT_associated_signatures[i],
+                              drugs_of_interest_color = PARP_WNT_drugs) %>% 
+    print()
+  
+}
+```
+
+```{r}
+ALL_correlations %>% 
+  filter(Gene_Set == "Stephen_CAT_signature",
+         abs(spearman_R) > 0.5, 
+         n_cell_lines > 10)
+```
+
+
+#10. For the drugs of interst, which pathways are most highly correlated with them?
+
+### Using Pancancer correlations
+
+```{r, message = FALSE, warning = false}
+ 
+  
+for(i in 1:length(PARP_WNT_drugs)){
+  
+      one_drug_all_genesets_graph(correlation_output = pancancer_correlations, 
+                                  drug_filter = PARP_WNT_drugs[i],
+                                  gene_sets_of_interest = CAT_associated_signatures) %>% 
+    print()
+  
+}
+
+
+```
+
+
+### Using Leukemia only correlations
+
+
+```{r, message = FALSE, warning = false}
+ 
+  
+for(i in 1:length(PARP_WNT_drugs)){
+  
+      one_drug_all_genesets_graph(correlation_output = leukemia_correlations, 
+                                  drug_filter = PARP_WNT_drugs[i],
+                                  gene_sets_of_interest = CAT_associated_signatures) %>% 
+    print()
+  
+}
+
+```
+
+
+### Using ALL only correlations
+
+
+```{r, message = FALSE, warning = false}
+ 
+  
+for(i in 1:length(PARP_WNT_drugs)){
+  
+      one_drug_all_genesets_graph(correlation_output = ALL_correlations, 
+                                  drug_filter = PARP_WNT_drugs[i],
+                                  gene_sets_of_interest = CAT_associated_signatures) %>% 
+    print()
+  
+}
+
+
+```
+
+The graphs flip for the ALL for some of these correlations, where now some are positively correlated. But this could be an issue with the number of cell lines
+
+```{r}
+ALL_correlations %>% 
+  filter(Drug %in% PARP_WNT_drugs,
+         Gene_Set %in% CAT_associated_signatures) %>% 
+  arrange(Drug)
+```
+
+From this table, we can see that none of the ALL only correlations between the drugs of interest and the pathways of interest are significant. A majority of them are positive, bucking the trend from the above tables, but it is hard to tell if this is meaningful. 
+
+
+
+# 11. Visualizing Individual Correlations for Drugs of Interest in Pathways of Interest, Calculated using Leukemia with TALL colored in
+
+```{r, message= FALSE}
 #Stephen said just to use the T-ALL categorization that DepMap uses
 # xlsx_stephen_cell_lines <-  readxl::read_xlsx(path = "./GDSC - Cell Lines Metadata_TALL.xlsx")
 # stephen_cell_lines <- xlsx_stephen_cell_lines$`Sample Name`
@@ -520,34 +619,161 @@ tall_color <- drug_gsva_final_data %>%
   distinct() %>% 
   pull(cell_line_name)
 
-gsva_filtering_function() %>% 
-  gsva_correlation_function() -> gsva_final_correlation_leukemia
-
-gsva_final_correlation_leukemia
-
-for(i in 1:length(sig.names)) {
-gsva_filtering_function() %>% 
-gsva_graphing_function(drug = "olaparib", gene_set = sig.names[i], color = tall_color) %>% 
-    print()
-}
-
-
-```
-
-
-```{r}
-for(i in 1:length(sig.names)) {
+for(i in 1:length(CAT_associated_signatures)) {
   for(j in 1:length(drugs_of_interest)){
 gsva_filtering_function() %>% 
-gsva_graphing_function(drug = drugs_of_interest[j], gene_set = sig.names[i], color = tall_color) %>% 
+gsva_graphing_function(drug = drugs_of_interest[j], gene_set = CAT_associated_signatures[i], 
+                       color = tall_color) %>% 
     print()
   }
 }
 
 ```
 
-# CHECK: IS GSVA the same no matter the number of CCLs used
+
+#12 Visualize GSVA results across the tissue types
+
 ```{r}
+gsva_ccl.meta
+```
+
+```{r}
+
+plentiful_diseases <- gsva_ccl.meta %>% 
+  count(primary_disease) %>% filter(n > 20) %>% pull(primary_disease)
+
+
+tissue_gsva_values <- gsva_ccl.meta %>% 
+  filter(primary_disease %in% plentiful_diseases) %>% 
+  mutate(`Cancer Type`= if_else(cell_line_name %in% TALL_cell_lines, "T-ALL", primary_disease)) %>% 
+  mutate(color_column = if_else(`Cancer Type`== "T-ALL", "T-ALL", "Other")) %>% 
+  distinct() 
+
+for(i in 1:24){
+  
+plot <- tissue_gsva_values %>% 
+  ggplot(aes_string(x = quote(`Cancer Type`), y = sig.names[i], fill = "color_column")) + 
+  geom_boxplot() + 
+  theme(axis.text.x = element_text(angle = 40, hjust = 1)) 
+
+print(plot)
+}
+
+
+```
+
+```{r}
+leukemia_gsva_values <- tissue_gsva_values %>% 
+  filter(cell_line_name %in% leukemia_cell_lines) %>% 
+  mutate(Leukemia_Type = if_else(lineage_subtype == "ALL", 
+                                       if_else(cell_line_name %in% TALL_cell_lines, "T-ALL", "B-ALL"), 
+                                       lineage_subtype)) %>% 
+  select(Leukemia_Type, primary_disease, lineage_subtype, lineage_sub_subtype, everything())
+
+for(i in 1:24){
+  
+plot <- leukemia_gsva_values %>% 
+  ggplot(aes_string(x = quote(Leukemia_Type), y = sig.names[i])) + 
+  geom_boxplot(aes(fill = color_column)) + 
+  geom_dotplot(binaxis='y', stackdir='center', dotsize = 0.7) 
+
+print(plot)
+}
+```
+
+```{r}
+leukemia_gsva_values %>% 
+  select(-`Cancer Type`) %>% 
+  select(color_column, everything()) %>% 
+  pivot_longer(cols = 10:66, names_to = "Pathway", values_to = "GSVA_Score") %>%
+  mutate(Pathway = as_factor(Pathway)) %>% 
+  ggplot(aes(x = GSVA_Score, y = Pathway, color = color_column)) + 
+  geom_point(dotsize = 0.7)
+```
+
+
+
+#13: TAKEAWAYS
+
+We were able to calculate a GSVA score for 56 different pathways in all 700+ CCLE Cancer Cell Lines and correlate them with CTRP cell line drug response for over 500 drugs/drug combinations.
+
+1. Looking at a CAT-associated pathway correlation across all drugs, the PARP/WNT inhibitors tended to have a negative correlation with these pathways, but they were certainly not the most significant correlations with any of these pathways.
+
+2. Interestingly, looking at the drugs themselves, for Leukemia and pancancer analysis, the 7 pathways of interest were usually had the highest correlation (technically lowest, most negative correlation). For these inhibitors then, the pathways are some of the most associated with that particular drug. Since we didn't see it in the conclusion mentioned in (1), these inhibitors tend not to correlate well with any pathways, but the ones they do correlate with tend to be the CAT-associated pathways.
+
+3. In general, the T-ALL cell lines tend to have a high GSVA score in 
+
+One would think that the drug response of the drugs of interest (PARP/WNT inhibitors) may correlate and that the pathway GSVA values for the pathways of interest would also correlate. So it is not surprising to see them more or less clustering, it is more of a internal check and shows that the conclusions from looking at any of these inhibitors or any of these pathways would be more or less the same. 
+
+
+
+
+Follow-up:
+GDSC data could be used as a validation
+Maybe just look into clustering patient data using the signatures
+Maybe look at PTEN mutations and association with these signatures. 
+
+Notch mutations, PTEN and AKT alterations (PTEN mutations are more prevalent)
+  PTEN mutation might be effectively the same as B-catenin stabilization
+  B-catenin mutations are not common in T-ALL 
+  (Notch somehow needs B-catenin it appears)
+  Indirect mechanisms leading to B-catenin
+  
+  
+  
+
+
+
+# EXTRA Incorporate GDSC Data
+
+```{}
+Harmonized_CCL_data <- readxl::read_excel(path = "Harmonized_CCL_data.xlsx")
+GDSC1 <- read_csv(file = "GDSC1_fitted_dose_response_25Feb20.csv")
+GDSC2 <- read_csv(file = "GDSC2_fitted_dose_response_25Feb20.csv")
+
+
+Harmonized_CCL_data %>% 
+  select(Cell_Line_Name_In_Dataset, Dataset, Harmonized_Cell_Line_ID) %>% 
+  mutate(RRID = gsub(pattern = ".*RRID:|)", replacement = "", x = Harmonized_Cell_Line_ID)) ->
+small_harmonized_CCL
+
+GDSC1 %>% select(CELL_LINE_NAME, DRUG_NAME, LN_IC50) %>% 
+  left_join(. , small_harmonized_CCL, by = c("CELL_LINE_NAME" = "Cell_Line_Name_In_Dataset")) %>% 
+  select(-Dataset) %>% 
+  distinct() ->
+RRID_GDSC1
+```
+
+
+```{}
+#gsva_ccl.meta should work still
+ 
+#need DEPMAP IDs though
+small_CCLE_metadata <- CCLE_meta_data %>% select(DepMap_ID, RRID)
+
+RRID_GDSC1 %>% left_join(., y = small_CCLE_metadata) %>% 
+  select(DepMap_ID, DRUG_NAME, LN_IC50) ->
+DepMap_GDSC1
+
+GDSC_with_meta <- CTRP_meta_data %>% 
+  filter(Dataset == "GDSC1") %>% 
+  select(Compound_Name_in_Dataset, Compound_MOA, Compound_Molecular_Targets) %>% 
+  left_join(x = DepMap_GDSC1, y = ., by = c("DRUG_NAME" = "Compound_Name_in_Dataset"))
+
+
+#now combine the GSVA with CCLE metadata with the CTRP with meta data
+
+drug_gsva_final_data <- left_join(GDSC_with_meta, gsva_ccl.meta)
+
+```
+
+
+
+
+
+
+# EXTRA CHECK: IS GSVA the same no matter the number of CCLs used
+```{}
 #get TALL cell lines (DEPMAP IDs)
 TALL_cell_lines <- drug_gsva_final_data %>% 
   filter(lineage_subtype == "ALL") %>% 
@@ -575,7 +801,7 @@ cor(gsva.es.subtall[i,], gsva.tall[i,]) %>% print()
 
 The two highly correlate, but looking at the numbers themselves, the absolute values definitely change. Let's try just the leukemia cell lines
 
-```{r}
+```{}
 
 #get all leukemia cell lines (DEPMAP IDs)
 leukemia_cell_lines <- drug_gsva_final_data %>% 
@@ -609,9 +835,9 @@ drug_gsva_leukemia <- inner_join(CTRP_with_meta, gsva_leukemia.meta, by = c("dep
 ```
 
 
-# 14. Leukemia GSVA and T-ALL Colored 
+# Leukemia-only GSVA and T-ALL Colored 
 
-```{r}
+```{}
 # now go through the graphing function as before
 drugs_of_interest <- CTRP_with_meta %>% 
   filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
@@ -648,71 +874,5 @@ My conclusion from this is essentially that they are exactly the same, the leuke
 
 The only noteable change is that this filters out some genes because they don't change expression in the leukemia cell lines (usually means they are not expressed) 
 
-
-# Incorporate GDSC Data
-
-```{r}
-Harmonized_CCL_data <- readxl::read_excel(path = "Harmonized_CCL_data.xlsx")
-GDSC1 <- read_csv(file = "GDSC1_fitted_dose_response_25Feb20.csv")
-GDSC2 <- read_csv(file = "GDSC2_fitted_dose_response_25Feb20.csv")
-
-
-Harmonized_CCL_data %>% 
-  select(Cell_Line_Name_In_Dataset, Dataset, Harmonized_Cell_Line_ID) %>% 
-  mutate(RRID = gsub(pattern = ".*RRID:|)", replacement = "", x = Harmonized_Cell_Line_ID)) ->
-small_harmonized_CCL
-
-GDSC1 %>% select(CELL_LINE_NAME, DRUG_NAME, LN_IC50) %>% 
-  left_join(. , small_harmonized_CCL, by = c("CELL_LINE_NAME" = "Cell_Line_Name_In_Dataset")) %>% 
-  select(-Dataset) %>% 
-  distinct() ->
-RRID_GDSC1
-```
-
-
-```{r}
-#gsva_ccl.meta should work still
- 
-#need DEPMAP IDs though
-small_CCLE_metadata <- CCLE_meta_data %>% select(DepMap_ID, RRID)
-
-RRID_GDSC1 %>% left_join(., y = small_CCLE_metadata) %>% 
-  select(DepMap_ID, DRUG_NAME, LN_IC50) ->
-DepMap_GDSC1
-
-GDSC_with_meta <- CTRP_meta_data %>% 
-  filter(Dataset == "GDSC1") %>% 
-  select(Compound_Name_in_Dataset, Compound_MOA, Compound_Molecular_Targets) %>% 
-  left_join(x = DepMap_GDSC1, y = ., by = c("DRUG_NAME" = "Compound_Name_in_Dataset"))
-
-
-#now combine the GSVA with CCLE metadata with the CTRP with meta data
-
-drug_gsva_final_data <- left_join(GDSC_with_meta, gsva_ccl.meta)
-
-```
-
-
-
-Notes:
-
-
-GDSC data still needs to be used
-
-Nice to see that the T-ALL cell lines do have a higher GSVA score in all the pathways Stephen gave me compared to any other leukemia:
-
-  Do this, plot GSVA for all cell lines by Tissue type!!!!
-
-
-Wnt vs PARP inhibitors (correlate); response and also GSVA 
-
-Notch mutations, PTEN and AKT alterations (PTEN mutations are more prevalent)
-  PTEN mutation might be effectively the same as B-catenin stabilization
-  B-catenin mutations are not common in T-ALL 
-  (Notch somehow needs B-catenin it appears)
-  Indirect mechanisms leading to B-catenin
-  
-  
-  
 
 
