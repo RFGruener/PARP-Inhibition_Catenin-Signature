@@ -3,7 +3,7 @@ title: "Catenin Signature and PARP Inhibition in CTRP Cell Lines"
 output: html_notebook
 ---
 ```{r}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 ```
 
 *Before starting, please make a data_in folder and place the following DepMap files there:*
@@ -31,6 +31,7 @@ library(broom)
 
 
 Outline:
+
   1. Load in the signature infortmation:
         Signatures from MSigDB (G2M, HDR, etc.)
         Catenin signature information created from differential gene expression analysis
@@ -142,7 +143,6 @@ summary(signature_list)
 gsva.es <- gsva(expr = CCLE.matrix, gset.idx.list = signature_list)
 gsva.hallmark <- gsva(expr = CCLE.matrix, gset.idx.list = hallmark_gene_list)
 
-gsva.es[1:6, 1:10]
 
 gsva_all_sigs <- rbind(gsva.es, gsva.hallmark)
 
@@ -188,10 +188,6 @@ CTRP_with_meta <- CTRP_meta_data %>%
 drug_gsva_final_data <- left_join(CTRP_with_meta, gsva_ccl.meta, by = c("depmap_id" = "DepMap_ID"))
 
 
-knitr::kable(drug_gsva_final_data[1:10, ])
-  
-
-
 ```
 
 
@@ -205,7 +201,7 @@ sig.names <- c(names(signature_list), names(hallmark_gene_list))
 drug_gsva_final_data  %>% 
   group_by(Drug) %>% 
   drop_na(AUCs, any_of(sig.names)) %>%
-  summarise_at(vars({{sig.names}}), ~cor(AUCs,., method = "spearman")) %>% knitr::kable()
+  summarise_at(vars({{sig.names}}), ~cor(AUCs,., method = "spearman")) 
 ```
 
 The table above gets a correlation between cell line GSVA score in that pathway and drug response to that drug across all cell lines. But the format is a matrix and harder to work with. Keeping it just in case, but below is better: 
@@ -681,16 +677,42 @@ print(plot)
 }
 ```
 
-```{r}
+```{r, out.width= "150%", fig.width= 10, fig.asp = 1.618}
 leukemia_gsva_values %>% 
   select(-`Cancer Type`) %>% 
   select(color_column, everything()) %>% 
   pivot_longer(cols = 10:66, names_to = "Pathway", values_to = "GSVA_Score") %>%
   mutate(Pathway = as_factor(Pathway)) %>% 
   ggplot(aes(x = GSVA_Score, y = Pathway, color = color_column)) + 
-  geom_point(dotsize = 0.7)
+  geom_point()
 ```
 
+```{r}
+leukemia_gsva_values %>% 
+  select(-`Cancer Type`) %>% 
+  select(color_column, everything()) %>% 
+  pivot_longer(cols = 10:66, names_to = "Pathway", values_to = "GSVA_Score") %>% 
+  group_by(Pathway) %>% 
+  do(tidy(t.test(.$GSVA_Score~.$color_column))) %>% 
+  mutate(CAT = if_else(Pathway %in% CAT_associated_signatures, "CAT", "Other")) %>% 
+  select(Pathway, CAT, p.value, everything()) %>% 
+  arrange(p.value)
+```
+
+There are some others that are higher significance, but most of these are association in the other direction (downregulated, not enriched in T-ALL)
+
+```{r}
+tissue_gsva_values %>% 
+  select(-`Cancer Type`) %>% 
+  select(color_column, everything()) %>% 
+  pivot_longer(cols = 9:65, names_to = "Pathway", values_to = "GSVA_Score") %>% 
+  group_by(Pathway) %>% 
+  do(tidy(t.test(.$GSVA_Score~.$color_column))) %>% 
+  mutate(CAT = if_else(Pathway %in% CAT_associated_signatures, "CAT", "Other")) %>% 
+  select(Pathway, CAT, p.value, everything()) %>% 
+  arrange(p.value)
+```
+Again, note. There are some others that are higher significance, but most of these are association in the other direction (downregulated, not enriched in T-ALL)
 
 
 #13: TAKEAWAYS
@@ -701,7 +723,7 @@ We were able to calculate a GSVA score for 56 different pathways in all 700+ CCL
 
 2. Interestingly, looking at the drugs themselves, for Leukemia and pancancer analysis, the 7 pathways of interest were usually had the highest correlation (technically lowest, most negative correlation). For these inhibitors then, the pathways are some of the most associated with that particular drug. Since we didn't see it in the conclusion mentioned in (1), these inhibitors tend not to correlate well with any pathways, but the ones they do correlate with tend to be the CAT-associated pathways.
 
-3. In general, the T-ALL cell lines tend to have a high GSVA score in 
+3. In general, the T-ALL cell lines tend to have a high GSVA score in the CAT pathways. Even by t-test results, these are the most significant pathways that are enriched in T-ALL over either other leukemias or all other cancers. 
 
 One would think that the drug response of the drugs of interest (PARP/WNT inhibitors) may correlate and that the pathway GSVA values for the pathways of interest would also correlate. So it is not surprising to see them more or less clustering, it is more of a internal check and shows that the conclusions from looking at any of these inhibitors or any of these pathways would be more or less the same. 
 
@@ -721,12 +743,17 @@ Notch mutations, PTEN and AKT alterations (PTEN mutations are more prevalent)
   
   
   
+# EXTRA
+
+```{r}
+knitr::opts_chunk$set(eval = FALSE, include = FALSE)
+```
 
 
 
 # EXTRA Incorporate GDSC Data
 
-```{}
+```{r}
 Harmonized_CCL_data <- readxl::read_excel(path = "Harmonized_CCL_data.xlsx")
 GDSC1 <- read_csv(file = "GDSC1_fitted_dose_response_25Feb20.csv")
 GDSC2 <- read_csv(file = "GDSC2_fitted_dose_response_25Feb20.csv")
@@ -745,7 +772,7 @@ RRID_GDSC1
 ```
 
 
-```{}
+```{r}
 #gsva_ccl.meta should work still
  
 #need DEPMAP IDs though
@@ -773,7 +800,7 @@ drug_gsva_final_data <- left_join(GDSC_with_meta, gsva_ccl.meta)
 
 
 # EXTRA CHECK: IS GSVA the same no matter the number of CCLs used
-```{}
+```{r}
 #get TALL cell lines (DEPMAP IDs)
 TALL_cell_lines <- drug_gsva_final_data %>% 
   filter(lineage_subtype == "ALL") %>% 
@@ -801,7 +828,7 @@ cor(gsva.es.subtall[i,], gsva.tall[i,]) %>% print()
 
 The two highly correlate, but looking at the numbers themselves, the absolute values definitely change. Let's try just the leukemia cell lines
 
-```{}
+```{r}
 
 #get all leukemia cell lines (DEPMAP IDs)
 leukemia_cell_lines <- drug_gsva_final_data %>% 
@@ -835,9 +862,9 @@ drug_gsva_leukemia <- inner_join(CTRP_with_meta, gsva_leukemia.meta, by = c("dep
 ```
 
 
-# Leukemia-only GSVA and T-ALL Colored 
+### Leukemia-only GSVA and T-ALL Colored 
 
-```{}
+```{r}
 # now go through the graphing function as before
 drugs_of_interest <- CTRP_with_meta %>% 
   filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 
