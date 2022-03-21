@@ -3,12 +3,15 @@ title: "Catenin Signature and PARP Inhibition in CTRP Cell Lines"
 output: html_notebook
 ---
 ```{r}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, error = FALSE)
 ```
 
 *Before starting, please make a data_in folder and place the following DepMap files there:*
+
 -"CCLE_expression_21Q3.csv"
+
 -"Drug_sensitivity_AUC_(CTD^2).csv
+
 -"sample_info.csv"
 
 Both of these files are available from [this link](https://depmap.org/portal/download/custom/) 
@@ -133,12 +136,12 @@ CCLE.matrix <- as.matrix(CCLE[,-1])
 rownames(CCLE.matrix) <- CCLE$depmap_id
 CCLE.matrix <- t(CCLE.matrix)
 
-CCLE.matrix[1:5, 1:10]
+#CCLE.matrix[1:5, 1:10]
 #looks good now
 
 
 # The signature list is already a list of gene sets, with names. It looks appropriately formatted 
-summary(signature_list)
+#summary(signature_list)
 
 gsva.es <- gsva(expr = CCLE.matrix, gset.idx.list = signature_list)
 gsva.hallmark <- gsva(expr = CCLE.matrix, gset.idx.list = hallmark_gene_list)
@@ -224,8 +227,7 @@ drug_gsva_final_data %>%
   #make tidy format and then unnest the tibbles 
   unnest(cols = nested_tibbles) %>% 
   select(Drug, Gene_Set, n_cell_lines = count, spearman_R = estimate, p.value) %>% 
-  arrange(p.value) %>% 
-  knitr::kable()
+  arrange(p.value) 
 
 ```
 
@@ -743,17 +745,10 @@ Notch mutations, PTEN and AKT alterations (PTEN mutations are more prevalent)
   
   
   
-# EXTRA
-
-```{r}
-knitr::opts_chunk$set(eval = FALSE, include = FALSE)
-```
-
-
 
 # EXTRA Incorporate GDSC Data
 
-```{r}
+```{r, eval = FALSE, include = FALSE}
 Harmonized_CCL_data <- readxl::read_excel(path = "Harmonized_CCL_data.xlsx")
 GDSC1 <- read_csv(file = "GDSC1_fitted_dose_response_25Feb20.csv")
 GDSC2 <- read_csv(file = "GDSC2_fitted_dose_response_25Feb20.csv")
@@ -772,7 +767,7 @@ RRID_GDSC1
 ```
 
 
-```{r}
+```{r, eval = FALSE, include = FALSE}
 #gsva_ccl.meta should work still
  
 #need DEPMAP IDs though
@@ -800,7 +795,7 @@ drug_gsva_final_data <- left_join(GDSC_with_meta, gsva_ccl.meta)
 
 
 # EXTRA CHECK: IS GSVA the same no matter the number of CCLs used
-```{r}
+```{r, eval = FALSE, include = FALSE}
 #get TALL cell lines (DEPMAP IDs)
 TALL_cell_lines <- drug_gsva_final_data %>% 
   filter(lineage_subtype == "ALL") %>% 
@@ -828,7 +823,7 @@ cor(gsva.es.subtall[i,], gsva.tall[i,]) %>% print()
 
 The two highly correlate, but looking at the numbers themselves, the absolute values definitely change. Let's try just the leukemia cell lines
 
-```{r}
+```{r, eval = FALSE, include = FALSE}
 
 #get all leukemia cell lines (DEPMAP IDs)
 leukemia_cell_lines <- drug_gsva_final_data %>% 
@@ -864,7 +859,7 @@ drug_gsva_leukemia <- inner_join(CTRP_with_meta, gsva_leukemia.meta, by = c("dep
 
 ### Leukemia-only GSVA and T-ALL Colored 
 
-```{r}
+```{r, eval = FALSE, include = FALSE}
 # now go through the graphing function as before
 drugs_of_interest <- CTRP_with_meta %>% 
   filter(grepl(x = Compound_Molecular_Targets, pattern = "PARP|WNT" )|grepl(x = Compound_MOA, pattern = "PARP|WNT" )) %>% 

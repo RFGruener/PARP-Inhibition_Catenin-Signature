@@ -1,0 +1,62 @@
+---
+title: "PARP inhibitor in ALL database"
+output: html_notebook
+---
+
+```{r}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(broom)
+```
+
+```{r}
+drug_response <- read_xlsx(path = "drug_response_BLOODpaper.xlsx", sheet = "Supplementary table 2a", na = "NA")
+
+drugs_of_interest <- c("OLAPARIB", "XAV-939")
+```
+
+```{r}
+t.test_results <- drug_response %>% 
+  mutate(Subtype = if_else(grepl(pattern = "^T-", x = PATIENT), "T-ALL", "B-ALL")) %>% 
+  select(PATIENT, Subtype, everything()) %>% 
+  pivot_longer(cols = 3:62, names_to = "Drug", values_to = "LN_IC50") %>% 
+  group_by(Drug) %>% 
+  do(tidy(t.test(.$LN_IC50 ~ .$Subtype))) %>% 
+  select(Drug, p.value, everything()) %>% 
+  arrange(p.value)
+
+t.test_results
+
+```
+
+```{r}
+drug_response %>% 
+  mutate(Subtype = if_else(grepl(pattern = "^T-", x = PATIENT), "T-ALL", "B-ALL")) %>% 
+  select(PATIENT, Subtype, everything()) %>% 
+  pivot_longer(cols = 3:62, names_to = "Drug", values_to = "LN_IC50") %>% 
+  filter(Drug == "OLAPARIB") %>% 
+  ggplot(aes(x = Subtype, y = LN_IC50)) + 
+  geom_boxplot() +
+  labs(title = "OLAPARIB")
+
+t.test_results %>% filter(Drug == "OLAPARIB")
+```
+
+
+```{r}
+drug_response %>% 
+  mutate(Subtype = if_else(grepl(pattern = "^T-", x = PATIENT), "T-ALL", "B-ALL")) %>% 
+  select(PATIENT, Subtype, everything()) %>% 
+  pivot_longer(cols = 3:62, names_to = "Drug", values_to = "LN_IC50") %>% 
+  filter(Drug == "XAV-939") %>% 
+  ggplot(aes(x = Subtype, y = LN_IC50)) + 
+  geom_boxplot() +
+  labs(title = "XAV-939")
+
+t.test_results %>% filter(Drug == "XAV-939")
+```
+
